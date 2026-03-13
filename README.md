@@ -1,25 +1,25 @@
-# Foods Image Crawler
+# 中餐菜品图片抓取工具
 
-Local CLI tool for collecting Chinese dish images for restaurant ordering systems.
+这是一个本地命令行工具，用于为餐饮点餐系统批量抓取中餐菜品图片。
 
-## Requirements
+## 环境要求
 
-- Python 3.9+
+- Python 3.9 及以上
 - `Pillow`
 
-## Install
+## 安装依赖
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
 ```
 
-## Run
+## 运行方式
 
 ```bash
 python -m src.main
 ```
 
-## Output
+## 输出结果
 
 ```text
 output/
@@ -31,7 +31,7 @@ output/
 └── manifest.csv
 ```
 
-`manifest.csv` includes:
+`manifest.csv` 包含以下字段：
 
 - `image_id`
 - `dish_name`
@@ -41,8 +41,8 @@ output/
 - `source_url`
 - `status`
 
-## Notes
+## 说明
 
-- The default provider uses public web image search results, so quality can vary by dish.
-- Some dishes may produce fewer than 3 valid images if search results are weak or downloads fail.
-- Review image copyright and source compliance before using the assets in production.
+- 默认搜索源使用公开网络图片搜索结果，不同菜品的图片质量可能不一致。
+- 如果搜索结果较差或下载失败，部分菜品最终可能不足 3 张有效图片。
+- 在正式商用前，请自行确认图片版权和来源合规性。
