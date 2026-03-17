@@ -1,7 +1,8 @@
 import json
+import logging
 import re
 from typing import Optional, Protocol
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 from urllib.request import Request, urlopen
 
 from src.models import CandidateImage
@@ -12,12 +13,17 @@ USER_AGENT = (
 )
 
 
-def build_query(dish_name: str) -> str:
-    return f"{dish_name} 中餐 菜品图 实拍"
+def build_query(item_name: str, query_suffix: str) -> str:
+    return f"{item_name} {query_suffix}".strip()
 
 
 class SearchProvider(Protocol):
-    def search(self, dish_name: str, limit: int) -> list[CandidateImage]:
+    def search(self, item_name: str, limit: int) -> list[CandidateImage]:
+        ...
+
+
+class QuerySearchProvider(Protocol):
+    def search(self, query: str, item_name: str, limit: int) -> list[CandidateImage]:
         ...
 
 
@@ -29,10 +35,10 @@ class FallbackSearchProvider:
     def __init__(self, providers):
         self.providers = providers
 
-    def search(self, dish_name: str, limit: int) -> list[CandidateImage]:
+    def search(self, item_name: str, limit: int) -> list[CandidateImage]:
         for provider in self.providers:
             try:
-                results = provider.search(dish_name, limit)
+                results = provider.search(item_name, limit)
             except Exception:
                 continue
             if results:
@@ -44,8 +50,7 @@ class DuckDuckGoImageSearchProvider:
     def __init__(self, timeout: int = 15):
         self.timeout = timeout
 
-    def search(self, dish_name: str, limit: int) -> list[CandidateImage]:
-        query = build_query(dish_name)
+    def search(self, query: str, item_name: str, limit: int) -> list[CandidateImage]:
         vqd = self._fetch_vqd(query)
         if not vqd:
             return []
@@ -56,7 +61,7 @@ class DuckDuckGoImageSearchProvider:
             image_url = item.get("image")
             if not image_url:
                 continue
-            results.append(CandidateImage(dish_name=dish_name, source_url=image_url))
+            results.append(CandidateImage(item_name=item_name, source_url=image_url))
             if len(results) >= limit:
                 break
         return results
@@ -96,8 +101,7 @@ class WikimediaImageSearchProvider:
     def __init__(self, timeout: int = 15):
         self.timeout = timeout
 
-    def search(self, dish_name: str, limit: int) -> list[CandidateImage]:
-        query = f"{dish_name} food"
+    def search(self, query: str, item_name: str, limit: int) -> list[CandidateImage]:
         url = (
             "https://commons.wikimedia.org/w/api.php?action=query&format=json"
             f"&generator=search&gsrnamespace=6&gsrsearch={quote_plus(query)}"
@@ -125,7 +129,125 @@ class WikimediaImageSearchProvider:
             image_url = imageinfo[0].get("url")
             if not image_url:
                 continue
-            results.append(CandidateImage(dish_name=dish_name, source_url=image_url))
+            results.append(CandidateImage(item_name=item_name, source_url=image_url))
             if len(results) >= limit:
                 break
+        return results
+
+
+class PixabayImageSearchProvider:
+    def __init__(self, api_key: str, timeout: int = 15):
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def search(self, query: str, item_name: str, limit: int) -> list[CandidateImage]:
+        params = urlencode(
+            {
+                "key": self.api_key,
+                "q": query,
+                "image_type": "photo",
+                "lang": "zh",
+                "per_page": limit,
+            }
+        )
+        request = Request(
+            f"https://pixabay.com/api/?{params}",
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise SearchProviderError(str(exc)) from exc
+        return self._parse_payload(payload, item_name, limit)
+
+    def _parse_payload(self, payload: dict, item_name: str, limit: int) -> list[CandidateImage]:
+        results: list[CandidateImage] = []
+        for item in payload.get("hits", []):
+            image_url = item.get("largeImageURL") or item.get("webformatURL")
+            if not image_url:
+                continue
+            results.append(CandidateImage(item_name=item_name, source_url=image_url))
+            if len(results) >= limit:
+                break
+        return results
+
+
+class PexelsImageSearchProvider:
+    def __init__(self, api_key: str, timeout: int = 15):
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def search(self, query: str, item_name: str, limit: int) -> list[CandidateImage]:
+        params = urlencode({"query": query, "per_page": limit})
+        request = Request(
+            f"https://api.pexels.com/v1/search?{params}",
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+                "Authorization": self.api_key,
+            },
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise SearchProviderError(str(exc)) from exc
+        return self._parse_payload(payload, item_name, limit)
+
+    def _parse_payload(self, payload: dict, item_name: str, limit: int) -> list[CandidateImage]:
+        results: list[CandidateImage] = []
+        for item in payload.get("photos", []):
+            src = item.get("src", {})
+            image_url = src.get("large") or src.get("original")
+            if not image_url:
+                continue
+            results.append(CandidateImage(item_name=item_name, source_url=image_url))
+            if len(results) >= limit:
+                break
+        return results
+
+
+class EngineFallbackSearchProvider:
+    def __init__(self, providers):
+        self.providers = providers
+
+    def search(self, query: str, item_name: str, limit: int) -> list[CandidateImage]:
+        for provider in self.providers:
+            try:
+                results = provider.search(query, item_name, limit)
+            except Exception:
+                continue
+            if results:
+                return results
+        return []
+
+
+class MultiQuerySearchProvider:
+    def __init__(self, provider: QuerySearchProvider, query_suffixes: tuple[str, ...], logger=None):
+        self.provider = provider
+        self.query_suffixes = query_suffixes
+        self.logger = logger or logging.getLogger(__name__)
+
+    def search(self, item_name: str, limit: int) -> list[CandidateImage]:
+        results: list[CandidateImage] = []
+        seen_urls: set[str] = set()
+
+        for suffix in self.query_suffixes:
+            if len(results) >= limit:
+                break
+
+            query = build_query(item_name, suffix)
+            candidates = self.provider.search(query, item_name, limit)
+            self.logger.info('item=%s query="%s" candidates=%s', item_name, query, len(candidates))
+
+            for candidate in candidates:
+                if candidate.source_url in seen_urls:
+                    continue
+                seen_urls.add(candidate.source_url)
+                results.append(candidate)
+                if len(results) >= limit:
+                    break
+
+        self.logger.info("item=%s unique_candidates=%s", item_name, len(results))
         return results

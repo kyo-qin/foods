@@ -1,6 +1,15 @@
-# 中餐菜品图片抓取工具
+# 多类型图片抓取工具
 
-这是一个本地命令行工具，用于为餐饮点餐系统批量抓取中餐菜品图片。
+这是一个本地命令行工具，用于按预设类型批量抓取图片素材。当前内置 8 个类型：
+
+- `home_cooking`：家常炒菜
+- `beverage`：酒水饮料
+- `takeout_box`：打包盒
+- `staple_food`：主食
+- `dessert`：甜品
+- `noodle`：面食
+- `milk_tea`：奶茶
+- `coffee`：咖啡
 
 ## 环境要求
 
@@ -15,65 +24,102 @@ python3 -m pip install -r requirements-dev.txt
 
 ## 运行方式
 
+按类型执行：
+
 ```bash
-python -m src.main
+python3 -m src.main --type beverage
 ```
+
+如果不传 `--type`，默认使用 `home_cooking`。
+
+## 数据文件
+
+每个类型都有独立词表，位于 `data/categories/`：
+
+```text
+data/
+└── categories/
+    ├── home_cooking.txt
+    ├── beverage.txt
+    ├── takeout_box.txt
+    ├── staple_food.txt
+    ├── dessert.txt
+    ├── noodle.txt
+    ├── milk_tea.txt
+    └── coffee.txt
+```
+
+你可以直接修改对应 txt 文件里的词条，一行一个。
 
 ## 输出结果
 
 ```text
 output/
 ├── images/
-│   └── 鱼香肉丝/
-│       ├── 001.jpg
-│       ├── 002.jpg
-│       └── 003.jpg
+│   └── beverage/
+│       └── 可乐/
+│           ├── 001.jpg
+│           ├── 002.jpg
+│           └── 003.jpg
 └── manifest.csv
 ```
 
 `manifest.csv` 包含以下字段：
 
 - `image_id`
-- `dish_name`
+- `category_type`
+- `item_name`
 - `file_path`
 - `width`
 - `height`
 - `source_url`
 - `status`
 
-## 如何修改搜索词
+## 搜索词规则
 
-默认情况下，程序会读取 [data/dishes.txt](/Users/qintao/develop/projects/foods/data/dishes.txt) 里的词条，并在 [src/search.py](/Users/qintao/develop/projects/foods/src/search.py) 的 `build_query()` 中自动拼接搜索关键词。
+程序会根据类型自动拼接搜索后缀。当前逻辑位于 [src/search.py](/Users/qintao/develop/projects/foods/src/search.py)。
 
-如果你想改搜索内容，可以用下面两种方式：
-
-- 修改 [data/dishes.txt](/Users/qintao/develop/projects/foods/data/dishes.txt)：把每一行替换成你想抓取的主题词。它不一定必须是菜品，也可以是水果、饮品、甜点、门店环境、餐具、促销海报，或者任何你想搜索的图片主题。
-- 修改 [src/search.py](/Users/qintao/develop/projects/foods/src/search.py) 里的 `build_query()`：当前默认会在词条后面追加“中餐 菜品图 实拍”之类的限定词。如果你要搜索其他内容，可以改成更适合的关键词组合。
-
-例如，当前默认逻辑类似：
+例如：
 
 ```python
-def build_query(dish_name: str) -> str:
-    return f"{dish_name} 中餐 菜品图 实拍"
+build_query("可乐", "饮料 酒水 实拍 产品图")
 ```
 
-如果你想搜索饮品图片，可以改成：
+会生成：
 
-```python
-def build_query(dish_name: str) -> str:
-    return f"{dish_name} 饮品 实拍 高清"
+```text
+可乐 饮料 酒水 实拍 产品图
 ```
 
-如果你只想按原词直接搜索，也可以改成：
+各类型的默认搜索后缀和词表路径定义在 [src/categories.py](/Users/qintao/develop/projects/foods/src/categories.py)。
 
-```python
-def build_query(dish_name: str) -> str:
-    return dish_name
+## 可选官方图片 API
+
+为了提升稳定性，程序会优先使用官方图库 API，然后再回退到网页搜索源。当前顺序是：
+
+1. `Pixabay`
+2. `Pexels`
+3. `DuckDuckGo`
+4. `Wikimedia Commons`
+
+配置方式：
+
+```bash
+export PIXABAY_API_KEY="your_pixabay_key"
+export PEXELS_API_KEY="your_pexels_key"
+python3 -m src.main --type beverage
 ```
+
+说明：
+
+- 没有配置 API key 时，程序仍然可运行，只是会直接回退到现有网页搜索源。
+- 配置一个 key 也可以，程序只会启用对应的官方 provider。
+- 如果当前运行环境没有网络权限，程序会在启动阶段直接报错退出，而不是误导性地输出 0 张图片。
 
 ## 说明
 
-- 默认搜索源顺序为：先使用 `DuckDuckGo` 图片搜索，失败时自动回退到 `Wikimedia Commons`。
-- 默认搜索源使用公开网络图片搜索结果，不同菜品的图片质量可能不一致。
-- 如果搜索结果较差或下载失败，部分菜品最终可能不足 3 张有效图片。
+- 已配置 API key 时，默认搜索源顺序为：`Pixabay -> Pexels -> DuckDuckGo -> Wikimedia Commons`。
+- 未配置 API key 时，默认搜索源顺序为：`DuckDuckGo -> Wikimedia Commons`。
+- 每个词条默认保留 3 张图片。
+- 如果搜索结果较差或下载失败，部分词条最终可能不足 3 张有效图片。
 - 在正式商用前，请自行确认图片版权和来源合规性。
